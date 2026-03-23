@@ -1,0 +1,7 @@
+playwright
+pytest
+flet
+pyinstaller
+flet-desktop
+pyperclip
+requests
