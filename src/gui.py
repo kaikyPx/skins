@@ -131,6 +131,20 @@ def main(page: ft.Page):
     status_text = ft.Text("Pronto para buscar.")
     result_count_text = ft.Text("Exibindo 0 de 0 itens", size=12, color=ft.Colors.GREY_400)
 
+    # Filtros Dinâmicos de Exibição (Após Busca)
+    view_site_filters = {}
+    row_view_filters_content = ft.Row(wrap=True, spacing=10)
+    view_sites_container = ft.Container(
+        content=ft.Column([
+            ft.Text("Quais sites deseja exibir agora na tela?", weight=ft.FontWeight.BOLD, size=14, color=ft.Colors.BLUE_400),
+            row_view_filters_content
+        ], spacing=5),
+        padding=10,
+        bgcolor=ft.Colors.BLUE_GREY_900 if page.theme_mode == ft.ThemeMode.DARK else ft.Colors.GREY_200,
+        border_radius=8,
+        visible=False,
+    )
+
     loading_overlay = ft.Container(
         content=ft.Column([
             ft.ProgressRing(width=50, height=50, stroke_width=4),
@@ -168,24 +182,81 @@ def main(page: ft.Page):
 
     def create_site_card(site_name, site_items):
         count = len(site_items)
-        cheapest = min((getattr(item, 'price', 0) for item in site_items if getattr(item, 'price', 0) > 0), default=0)
         
+        # Ordena as skins pelo menor preço dentro do card
+        sorted_items = sorted(site_items, key=lambda x: getattr(x, 'price', float('inf')))
+
+        # Construir as linhas de cada skin
+        list_contents = []
+        for item in sorted_items:
+            float_val = getattr(item, 'float_value', 0)
+            float_str = f"{float_val:.10f}".rstrip('0').rstrip('.') if float_val > 0 else "0.0"
+            price = getattr(item, 'price', 0)
+            
+            row = ft.Container(
+                content=ft.Row([
+                    # Preço e Float
+                    ft.Column([
+                        ft.Text(f"${price:.2f}", size=15, weight=ft.FontWeight.BOLD, color=ft.Colors.GREEN_400),
+                        ft.Text(f"Float: {float_str}", size=12, color=ft.Colors.GREY_400),
+                    ], spacing=2, expand=True),
+                    
+                    # Botão Comprar (Copiar Link) - Visual de Carrinho/Link
+                    ft.IconButton(
+                        icon=ft.Icons.SHOPPING_CART_CHECKOUT,
+                        tooltip="Copiar Link para Comprar",
+                        data=item.url,
+                        on_click=copy_link,
+                        icon_color=ft.Colors.BLUE_400,
+                        icon_size=24,
+                    )
+                ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                padding=8,
+                bgcolor=ft.Colors.BLUE_GREY_900 if page.theme_mode == ft.ThemeMode.DARK else ft.Colors.GREY_200,
+                border_radius=8,
+            )
+            list_contents.append(row)
+            
+        # ListView configurada para mostrar ~5 itens visíveis 
+        # Cada Container de linha tem altura ~50-60px, então 250px acomoda quase 5 perfeitamente e indica scroll
+        items_list = ft.ListView(
+            controls=list_contents,
+            height=280, 
+            spacing=8,
+        )
+
         return ft.Card(
             content=ft.Container(
                 content=ft.Column([
-                    ft.Icon(ft.Icons.LANGUAGE, size=40, color=ft.Colors.BLUE_400),
-                    ft.Text(site_name, size=18, weight=ft.FontWeight.BOLD),
-                    ft.Text(f"{count} skins encontradas", size=14, color=ft.Colors.GREY_400),
-                    ft.Text(f"A partir de: ${cheapest:,.2f}" if cheapest > 0 else "Preço N/A", 
-                            size=16, weight=ft.FontWeight.BOLD, color=ft.Colors.GREEN_400),
+                    # Cabeçalho do Card
+                    ft.Row([
+                        ft.Icon(ft.Icons.STOREFRONT, size=24, color=ft.Colors.BLUE_400),
+                        ft.Text(site_name, size=18, weight=ft.FontWeight.BOLD, expand=True),
+                        ft.Container(
+                            content=ft.Text(f"{count}", size=12, weight=ft.FontWeight.BOLD),
+                            padding=ft.Padding.symmetric(horizontal=8, vertical=4),
+                            bgcolor=ft.Colors.BLUE_800,
+                            border_radius=10
+                        )
+                    ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                    
+                    ft.Divider(height=1, color=ft.Colors.GREY_800),
+                    
+                    # Lista de Skins (Scrollable)
+                    items_list,
+                    
+                    # Redirecionar para galeria caso queira ver as imagens grandes
                     ft.FilledButton(
-                        "Ver Skins",
+                        "Ver Detalhes/Imagens",
+                        icon=ft.Icons.IMAGE,
                         on_click=lambda _: open_site_details(site_name),
-                        style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=8))
+                        style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=8)),
+                        width=float('inf')
                     )
-                ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=10),
-                padding=20,
-                width=250,
+
+                ], spacing=10),
+                padding=15,
+                width=340, # Mais largo para acomodar o flex de listagem responsive
             ),
             elevation=4
         )
@@ -276,6 +347,15 @@ def main(page: ft.Page):
         
         sort_mode = dd_sort.value
         display_items = items.copy()
+
+        # Filtrar por site (Checkboxes da barra visual exclusiva)
+        site_filtered = []
+        for item in display_items:
+            s_name = getattr(item, 'site', 'Unknown')
+            chk = view_site_filters.get(s_name)
+            if chk is None or chk.value:
+                site_filtered.append(item)
+        display_items = site_filtered
         
         # Aplicar filtros de preço
         try:
@@ -416,7 +496,7 @@ def main(page: ft.Page):
         try:
             float_max = float(txt_float_max.value.replace(',', '.'))
         except:
-            float_max = 1.0
+            float_max = 0.99
             
         stattrak_allowed = chk_stattrak.value
 
@@ -431,6 +511,12 @@ def main(page: ft.Page):
         view_mode = "groups" # Reset para visão de grupos
         selected_site = None
         cards_grid.controls.clear() # Limpa grid anterior
+        
+        # Limpa os novos botões visuais
+        view_site_filters.clear()
+        row_view_filters_content.controls.clear()
+        view_sites_container.visible = False
+        
         page.update()
 
         # Buffer para atualização em lotes
@@ -440,8 +526,48 @@ def main(page: ft.Page):
 
         def handle_new_item(item):
             nonlocal items
-            items.append(item)
-            pending_items.append(item)
+            
+            site = getattr(item, 'site', 'Unknown')
+            site_items = [i for i in items if getattr(i, 'site', 'Unknown') == site]
+            
+            def get_price(x):
+                p = getattr(x, 'price', 0.0)
+                if p is None or p <= 0:
+                    return float('inf')
+                return float(p)
+                
+            item_price = get_price(item)
+            
+            if len(site_items) < 20:
+                items.append(item)
+                pending_items.append(item)
+                
+                # Renderiza o checkbox pro site na caixa visual, se já não existir
+                if site not in view_site_filters:
+                    # Função rápida para forçar update visual no change flag
+                    def _on_chk_change(e):
+                        trigger_update_with_spinner()
+                        
+                    chk = ft.Checkbox(label=site, value=True, on_change=_on_chk_change)
+                    view_site_filters[site] = chk
+                    row_view_filters_content.controls.append(chk)
+                    view_sites_container.visible = True
+            else:
+                # Compara com o mais caro dos 20 atuais
+                site_items.sort(key=get_price)
+                most_expensive = site_items[-1]
+                most_expensive_price = get_price(most_expensive)
+                
+                if item_price < most_expensive_price:
+                    # Remove o mais caro para manter o limite de 20
+                    items.remove(most_expensive)
+                    if most_expensive in pending_items:
+                        pending_items.remove(most_expensive)
+                        
+                    items.append(item)
+                    pending_items.append(item)
+                else:
+                    return # Ignora o item pois não está entre os 20 mais baratos
             
             curr_time = time.time()
             # Atualiza a cada 0.8 segundos ou se tiver mais de 5 itens pendentes
@@ -522,6 +648,49 @@ def main(page: ft.Page):
                 page.update()
 
                 with sync_playwright() as p:
+                    # --- PRÉ-AQUECIMENTO E VERIFICAÇÃO HUMANA ---
+                    # Identificar sites que geralmente exigem ou tem grande chance de pedir captcha/login
+                    pre_warm_urls = []
+                    if chk_buff.value: pre_warm_urls.append("https://buff.163.com/market/csgo")
+                    if chk_lisskins.value: pre_warm_urls.append("https://lis-skins.com/market/csgo/")
+                    if chk_skinflow.value: pre_warm_urls.append("https://skinflow.gg/buy")
+                    if chk_csmoney.value: pre_warm_urls.append("https://cs.money/market/buy")
+                    
+                    if pre_warm_urls:
+                        try:
+                            status_text.value = "Abrindo guias para verificação (Login/Captcha)..."
+                            page.update()
+                            
+                            browser_pre = p.chromium.connect_over_cdp(cdp_url)
+                            context_pre = browser_pre.contexts[0] if len(browser_pre.contexts) > 0 else browser_pre.new_context()
+                            
+                            # Abre silenciosamente uma guia pra cada site pra ativar o cookie/login session
+                            opened_pages = []
+                            for url in pre_warm_urls:
+                                new_p = context_pre.new_page()
+                                new_p.goto(url)
+                                opened_pages.append(new_p)
+                                time.sleep(1)
+                            
+                            # Contagem global amigável
+                            print("⏳ Iniciando janela de 2 minutos para resolução de Captchas e Logins...")
+                            for i in range(120, 0, -1):
+                                status_text.value = f"Resolva Captchas/Logins nos sites que abriram! Retomando em {i}s..."
+                                page.update()
+                                if i % 20 == 0:
+                                    print(f"DEBUG: Tempo restante para logins: {i}s...")
+                                time.sleep(1)
+                                
+                            status_text.value = "Tempo esgotado. Mantendo guias abertas e iniciando busca bruta..."
+                            page.update()
+                            
+                            # Mantemos as guias abertas propositalmente para não perder a 
+                            # 'confiança' do Cloudflare nem dropar sessões em andamento.
+                            
+                            browser_pre.close()
+                        except Exception as e:
+                            print(f"⚠️ Erro ao pré-aquecer guias: {e}")
+
                     # BUFF SCRAPER
                     if chk_buff.value:
                         buff_scraper = BuffScraper()
@@ -545,6 +714,84 @@ def main(page: ft.Page):
                                 print(f"⚠️ Scraper Buff163 ainda não suporta StatTrak, chamando sem o argumento...")
                                 buff_scraper.scrape(
                                     p, 
+                                    search_item=search_item,
+                                    search_skin=search_skin,
+                                    search_style=search_style,
+                                    float_min=float_min,
+                                    float_max=float_max,
+                                    executable_path=None,
+                                    user_data_dir=user_data_dir,
+                                    on_item_found=handle_new_item,
+                                    cdp_url=cdp_url
+                                )
+                            else:
+                                raise te
+
+                    # LISSKINS SCRAPER (Moved to 2nd)
+                    if chk_lisskins.value:
+                        print("--- Iniciando LisSkins Scraper ---")
+                        lisskins_scraper = LisSkinsScraper()
+                        try:
+                            lisskins_scraper.scrape(
+                                p,
+                                search_item=search_item,
+                                search_skin=search_skin,
+                                search_style=search_style,
+                                float_min=float_min,
+                                float_max=float_max,
+                                executable_path=None,
+                                user_data_dir=user_data_dir,
+                                on_item_found=handle_new_item,
+                                cdp_url=cdp_url,
+                                stattrak_allowed=stattrak_allowed
+                            )
+                        except Exception as e:
+                            print(f"⚠️ Erro no scraper LisSkins: {e}")
+
+                    # SKINFLOW SCRAPER (Moved to 3rd)
+                    if chk_skinflow.value:
+                        print("--- Iniciando Skinflow Scraper ---")
+                        skinflow_scraper = SkinflowScraper()
+                        try:
+                            skinflow_scraper.scrape(
+                                p,
+                                search_item=search_item,
+                                search_skin=search_skin,
+                                search_style=search_style,
+                                float_min=float_min,
+                                float_max=float_max,
+                                executable_path=None,
+                                user_data_dir=user_data_dir,
+                                on_item_found=handle_new_item,
+                                cdp_url=cdp_url,
+                                stattrak_allowed=stattrak_allowed
+                            )
+                        except Exception as e:
+                            print(f"⚠️ Erro no scraper Skinflow: {e}")
+
+                    # CSMONEY SCRAPER (Moved to 4th - after Skinflow)
+                    if chk_csmoney.value:
+                        print("--- Iniciando CSMoney Scraper ---")
+                        csmoney_scraper = CSMoneyScraper()
+                        try:
+                            csmoney_scraper.scrape(
+                                p,
+                                search_item=search_item,
+                                search_skin=search_skin,
+                                search_style=search_style,
+                                float_min=float_min,
+                                float_max=float_max,
+                                executable_path=None,
+                                user_data_dir=user_data_dir,
+                                on_item_found=handle_new_item,
+                                cdp_url=cdp_url,
+                                stattrak_allowed=stattrak_allowed
+                            )
+                        except TypeError as te:
+                            if "unexpected keyword argument 'stattrak_allowed'" in str(te):
+                                print(f"⚠️ Scraper CS.Money ainda não suporta StatTrak, chamando sem o argumento...")
+                                csmoney_scraper.scrape(
+                                    p,
                                     search_item=search_item,
                                     search_skin=search_skin,
                                     search_style=search_style,
@@ -593,43 +840,6 @@ def main(page: ft.Page):
                                 )
                             else:
                                 raise te
-
-                    # CSMONEY SCRAPER
-                    if chk_csmoney.value:
-                        print("--- Iniciando CSMoney Scraper ---")
-                        csmoney_scraper = CSMoneyScraper()
-                        try:
-                            csmoney_scraper.scrape(
-                                p,
-                                search_item=search_item,
-                                search_skin=search_skin,
-                                search_style=search_style,
-                                float_min=float_min,
-                                float_max=float_max,
-                                executable_path=None,
-                                user_data_dir=user_data_dir,
-                                on_item_found=handle_new_item,
-                                cdp_url=cdp_url,
-                                stattrak_allowed=stattrak_allowed
-                            )
-                        except TypeError as te:
-                            if "unexpected keyword argument 'stattrak_allowed'" in str(te):
-                                print(f"⚠️ Scraper CS.Money ainda não suporta StatTrak, chamando sem o argumento...")
-                                csmoney_scraper.scrape(
-                                    p,
-                                    search_item=search_item,
-                                    search_skin=search_skin,
-                                    search_style=search_style,
-                                    float_min=float_min,
-                                    float_max=float_max,
-                                    executable_path=None,
-                                    user_data_dir=user_data_dir,
-                                    on_item_found=handle_new_item,
-                                    cdp_url=cdp_url
-                                )
-                            else:
-                                raise te
-
                     # MARKETCSGO SCRAPER
                     if chk_marketcsgo.value:
                         print("--- Iniciando MarketCSGO Scraper ---")
@@ -811,47 +1021,7 @@ def main(page: ft.Page):
                         except Exception as e:
                             print(f"⚠️ Erro no scraper Avan.Market: {e}")
 
-                    # LISSKINS SCRAPER
-                    if chk_lisskins.value:
-                        print("--- Iniciando LisSkins Scraper ---")
-                        lisskins_scraper = LisSkinsScraper()
-                        try:
-                            lisskins_scraper.scrape(
-                                p,
-                                search_item=search_item,
-                                search_skin=search_skin,
-                                search_style=search_style,
-                                float_min=float_min,
-                                float_max=float_max,
-                                executable_path=None,
-                                user_data_dir=user_data_dir,
-                                on_item_found=handle_new_item,
-                                cdp_url=cdp_url,
-                                stattrak_allowed=stattrak_allowed
-                            )
-                        except Exception as e:
-                            print(f"⚠️ Erro no scraper LisSkins: {e}")
 
-                    # SKINFLOW SCRAPER
-                    if chk_skinflow.value:
-                        print("--- Iniciando Skinflow Scraper ---")
-                        skinflow_scraper = SkinflowScraper()
-                        try:
-                            skinflow_scraper.scrape(
-                                p,
-                                search_item=search_item,
-                                search_skin=search_skin,
-                                search_style=search_style,
-                                float_min=float_min,
-                                float_max=float_max,
-                                executable_path=None,
-                                user_data_dir=user_data_dir,
-                                on_item_found=handle_new_item,
-                                cdp_url=cdp_url,
-                                stattrak_allowed=stattrak_allowed
-                            )
-                        except Exception as e:
-                            print(f"⚠️ Erro no scraper Skinflow: {e}")
 
                     # SKINOUT SCRAPER
                     if chk_skinout.value:
@@ -1151,7 +1321,7 @@ def main(page: ft.Page):
     
     # Float para busca nos scrapers
     txt_float_min = ft.TextField(label="Float Min", value="0.0", width=100, keyboard_type=ft.KeyboardType.NUMBER)
-    txt_float_max = ft.TextField(label="Float Max", value="1.0", width=100, keyboard_type=ft.KeyboardType.NUMBER)
+    txt_float_max = ft.TextField(label="Float Max", value="0.99", width=100, keyboard_type=ft.KeyboardType.NUMBER)
     
     # Filtros de faixa de preço (após a busca)
     txt_filter_price_min = ft.TextField(label="Preço Min $", value="", hint_text="0.00", width=100, keyboard_type=ft.KeyboardType.NUMBER)
@@ -1159,10 +1329,12 @@ def main(page: ft.Page):
     
     # Filtros de faixa de float (após a busca)
     txt_filter_float_min = ft.TextField(label="Float Min", value="", hint_text="0.0", width=100, keyboard_type=ft.KeyboardType.NUMBER)
-    txt_filter_float_max = ft.TextField(label="Float Max", value="", hint_text="1.0", width=100, keyboard_type=ft.KeyboardType.NUMBER)
+    txt_filter_float_max = ft.TextField(label="Float Max", value="", hint_text="0.99", width=100, keyboard_type=ft.KeyboardType.NUMBER)
 
     # Checkboxes para seleção de sites
     chk_buff = ft.Checkbox(label="Buff163", value=True)
+    chk_lisskins = ft.Checkbox(label="LisSkins", value=True)
+    chk_skinflow = ft.Checkbox(label="Skinflow", value=True)
     chk_csfloat = ft.Checkbox(label="CSFloat", value=True)
     chk_csmoney = ft.Checkbox(label="CS.Money", value=True)
     chk_marketcsgo = ft.Checkbox(label="MarketCSGO", value=True)
@@ -1172,8 +1344,7 @@ def main(page: ft.Page):
     chk_rapidskins = ft.Checkbox(label="RapidSkins", value=True)
     chk_dmarket = ft.Checkbox(label="DMarket", value=True)
     chk_avan = ft.Checkbox(label="Avan.Market", value=True)
-    chk_lisskins = ft.Checkbox(label="LisSkins", value=True)
-    chk_skinflow = ft.Checkbox(label="Skinflow", value=True)
+
     chk_skinout = ft.Checkbox(label="Skinout", value=True)
     chk_dashskins = ft.Checkbox(label="DashSkins", value=True)
     chk_skinport = ft.Checkbox(label="Skinport", value=True)
@@ -1183,6 +1354,41 @@ def main(page: ft.Page):
     chk_itrade = ft.Checkbox(label="iTrade.gg", value=True)
     chk_tradeit = ft.Checkbox(label="TradeIt.gg", value=True)
     chk_stattrak = ft.Checkbox(label="StatTrak?", value=False)
+
+    # Mapeamento de nomes de sites (conforme retornados pelos scrapers) para os checkboxes
+    site_checkbox_map = {
+        "Buff163": chk_buff,
+        "CSFloat": chk_csfloat,
+        "CS.Money": chk_csmoney,
+        "MarketCSGO": chk_marketcsgo,
+        "WhiteMarket": chk_whitemarket,
+        "White Market": chk_whitemarket,
+        "ShadowPay": chk_shadowpay,
+        "HaloSkins": chk_haloskins,
+        "RapidSkins": chk_rapidskins,
+        "DMarket": chk_dmarket,
+        "Avan.Market": chk_avan,
+        "LisSkins": chk_lisskins,
+        "Skinflow": chk_skinflow,
+        "Skinout": chk_skinout,
+        "DashSkins": chk_dashskins,
+        "Skinport": chk_skinport,
+        "SkinPlace": chk_skinplace,
+        "Pirateswap": chk_pirateswap,
+        "SkinsMonkey": chk_skinsmonkey,
+        "itrade": chk_itrade,
+        "iTrade.gg": chk_itrade,
+        "TradeIt.gg": chk_tradeit
+    }
+
+    def on_site_visibility_change(e):
+        # Atualiza a tabela sempre que um checkbox de site mudar
+        if items:
+            update_table(force=True)
+
+    # Atribuir o evento on_change para todos os checkboxes de site
+    for chk in site_checkbox_map.values():
+        chk.on_change = on_site_visibility_change
 
     # Botão de refresh
     btn_refresh = ft.FilledButton(
@@ -1211,9 +1417,9 @@ def main(page: ft.Page):
             ft.Container(
                 content=ft.Column([
                     ft.Text("Sites & Filtros Especiais:", weight=ft.FontWeight.BOLD),
-                    ft.Row([chk_buff, chk_csfloat, chk_csmoney, chk_marketcsgo, chk_whitemarket], spacing=10),
-                    ft.Row([chk_shadowpay, chk_haloskins, chk_rapidskins, chk_dmarket, chk_avan], spacing=10),
-                    ft.Row([chk_lisskins, chk_skinflow, chk_skinout, chk_dashskins, chk_skinport], spacing=10),
+                    ft.Row([chk_buff, chk_lisskins, chk_skinflow, chk_csmoney, chk_csfloat], spacing=10),
+                    ft.Row([chk_marketcsgo, chk_whitemarket, chk_shadowpay, chk_haloskins, chk_rapidskins], spacing=10),
+                    ft.Row([chk_dmarket, chk_avan, chk_skinout, chk_dashskins, chk_skinport], spacing=10),
                     ft.Row([chk_skinplace, chk_pirateswap, chk_skinsmonkey, chk_itrade, chk_tradeit], spacing=10),
                     ft.Row([chk_stattrak], spacing=10),
                 ]),
@@ -1539,6 +1745,7 @@ def main(page: ft.Page):
                 result_count_text,
             ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
             ft.Divider(height=1),
+            view_sites_container, 
             # Barra de ferramentas de filtro moderna
             ft.Container(
                 content=ft.Row([

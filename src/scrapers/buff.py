@@ -117,15 +117,9 @@ class BuffScraper:
             print(f"Navegando para {self.base_url}...")
             page.goto(self.base_url, wait_until="domcontentloaded", timeout=30000)
             
-            # === AGUARDAR LOGIN (1 MINUTO conforme pedido pelo usuário) ===
-            print("⏳ Aguardando 60 segundos para login no Buff163...")
-            for i in range(60, 0, -1):
-                msg = f"Aguardando login no Buff163... {i}s restantes"
-                if on_status_update:
-                    on_status_update(msg)
-                if i % 10 == 0: # Print a cada 10s no console para não floodar
-                    print(f"DEBUG: {msg}")
-                time.sleep(1)
+            # === AGUARDAR LOGIN ===
+            print("⏳ Preparando página base do Buff163...")
+            time.sleep(3)
             
             if on_status_update:
                 on_status_update("Verificando login e iniciando busca...")
@@ -413,23 +407,23 @@ class BuffScraper:
                 else:
                     print("⚠️ Dropdown de estilo não encontrado (pode não existir para esta skin).")
 
-            # === FILTRO DE FLOAT (URL QUERY PARAM) ===
+            # === FILTRO DE FLOAT E ORDENAÇÃO (URL QUERY PARAM) ===
+            print(f"Aplicando filtros e ordenação via URL...")
+            current_url = page.url
+            base_url = current_url.split('#')[0]
+            
+            # Monta os parâmetros necessários, adicionando sort_by=price.asc
+            params = ["tab=selling", "page_num=1", "sort_by=price.asc"]
             if float_min > 0.0 or float_max < 1.0:
-                print(f"Aplicando filtro de Float via URL: {float_min} - {float_max}")
-                current_url = page.url
-                if "#" in current_url:
-                    if "min_paintwear=" not in current_url:
-                        new_url = f"{current_url}&min_paintwear={float_min}&max_paintwear={float_max}"
-                    else:
-                        new_url = current_url
-                else:
-                    new_url = f"{current_url}#tab=selling&page_num=1&min_paintwear={float_min}&max_paintwear={float_max}"
+                params.append(f"min_paintwear={float_min}")
+                params.append(f"max_paintwear={float_max}")
                 
-                if new_url != current_url:
-                    print(f"Navegando para URL filtrada: {new_url}")
-                    page.goto(new_url)
-                    print("Aguardando recarregamento com filtro (6s)...")
-                    time.sleep(6)
+            new_url = f"{base_url}#{'&'.join(params)}"
+            
+            print(f"Navegando para URL filtrada e ordenada: {new_url}")
+            page.goto(new_url)
+            print("Aguardando recarregamento com filtro e ordem (6s)...")
+            time.sleep(6)
 
             # === COLETA DE ITENS (COM PAGINAÇÃO) ===
             main_img_url = ""
@@ -446,6 +440,7 @@ class BuffScraper:
             
             page_num = 1
             max_pages = 50 
+            count_this_variant = 0
             
             while True:
                 print(f"--- Processando Página {page_num} ---")
@@ -571,12 +566,21 @@ class BuffScraper:
                         )
                         
                         items.append(item)
+                        count_this_variant += 1
                         if on_item_found:
                             on_item_found(item)
+                            
+                        # Limite de 20 itens por variante a pedido do usuário
+                        if count_this_variant >= 20:
+                            print(f"🛑 Limite de 20 itens atingido para a variante {base_name}.")
+                            break
                             
                     except Exception as e: 
                         print(f"❌ [Buff] Erro ao processar linha: {e}")
                         continue
+                
+                if count_this_variant >= 20:
+                    break
                 
                 next_btn = page.locator(".simple-pagination li:not(.disabled) .next").first
                 if next_btn.is_visible():

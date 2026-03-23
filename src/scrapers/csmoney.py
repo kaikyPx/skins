@@ -115,48 +115,53 @@ class CSMoneyScraper:
             else:
                 new_url = f"{new_url}&maxFloat={float_max}"
                 
+            # Adicionando order=asc no final a pedido do usuário
+            new_url = f"{new_url}&order=asc"
+                
             # Limpeza
             new_url = new_url.replace("?&", "?").replace("&&", "&")
             
             print(f"🚀 Navegando para URL Filtrada: {new_url}")
             page.goto(new_url)
             
-            # Lógica de Rolagem Infinita e Extração Contínua
-            print("📜 Iniciando Scroll Infinito e Extração...")
+            print("⏳ Aguardando 5 segundos pós-busca (com order=asc)...")
+            time.sleep(5)
             
-            last_height = page.evaluate("document.body.scrollHeight")
-            while True:
-                # Rola para o fim
-                page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                
-                # Aguarda carregamento (User pediu 3s)
-                time.sleep(3)
-                
-                new_height = page.evaluate("document.body.scrollHeight")
-                if new_height == last_height:
-                    print("🛑 Fim da página alcançado.")
-                    break
-                last_height = new_height
-                
-            # Após carregar tudo, extrair itens
-            print("✅ Página totalmente carregada. Processando itens...")
+            # Faz um scroll leve apenas para engatilhar lazy loads
+            page.evaluate("window.scrollBy(0, 1500)")
+            time.sleep(2)
             
-            float_divs = page.locator("div.csm_8b72a65e.csm_6f5f3612").all()
-            print(f"👀 Encontrados {len(float_divs)} possíveis indicadores de float.")
+            # Extrair itens
+            print("✅ Página inicial carregada. Processando itens (Máx 20)...")
             
-            # Se não achar pela classe exata (hash muda?), tenta por texto regex de float
-            if len(float_divs) == 0:
-                print("⚠️ Classes de float não encontradas. Tentando busca genérica...")
-                # Fallback logic later if needed
+            # CS.Money altera as classes continuamente. Abordagem Genérica (Bounding Box HTML):
+            potential_cards = page.locator("div").filter(has=page.locator("img")).filter(has_text="$").all()
+            
+            cards = []
+            for c in potential_cards:
+                try:
+                    box = c.bounding_box()
+                    if box and 120 < box['width'] < 450 and 150 < box['height'] < 550:
+                        cards.append(c)
+                except:
+                    pass
+            
+            # Evita processar o mesmo card em níveis diferentes de DIV filtrando textos idênticos
+            seen_texts = set()
+            unique_cards = []
+            for c in reversed(cards): # Lê de trás pra frente geralmente pega os filhos mais profundos
+                try:
+                    txt = c.inner_text().strip()
+                    if txt and txt not in seen_texts:
+                        seen_texts.add(txt)
+                        unique_cards.append(c)
+                except: pass
+                
+            print(f"👀 Encontrados {len(unique_cards)} possíveis cards na tela (heurística visual).")
             
             count = 0
-            for float_div in float_divs:
+            for card in unique_cards:
                 try:
-                    # O card deve ser um pai próximo (avô ou bisavô)
-                    # Vamos subir até achar um container que tenha imagem e preço
-                    card = float_div.locator("xpath=../../..") # Chute inicial, vamos ajustar
-                    
-                    # Para garantir que pegamos o card certo, vamos pegar o texto todo dele
                     text_content = card.inner_text()
                     
                     # 1. Filtro de StatTrak
@@ -179,9 +184,9 @@ class CSMoneyScraper:
                         continue
                     
                     # 3. Extrair Float
-                    float_match = re.search(r"0\.(\d{4,})", text_content)
+                    float_match = re.search(r"(0\.\d+)", text_content)
                     if float_match:
-                        float_val = float(f"0.{float_match.group(1)}")
+                        float_val = float(float_match.group(1))
                     else:
                         float_val = 0.0
                         
@@ -249,6 +254,10 @@ class CSMoneyScraper:
                     
                     if on_item_found:
                         on_item_found(item)
+                    
+                    if count >= 20:
+                        print("🛑 Limite de 20 itens atingido para o CS.Money. Encerrando scraper.")
+                        break
                         
                 except Exception as e:
                     # print(f"Erro ao processar card: {e}")

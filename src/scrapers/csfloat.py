@@ -170,12 +170,16 @@ class CSFloatScraper:
                 separator = "&" if "?" in new_url else "?"
                 new_url = f"{new_url}{separator}min_float={float_min}&max_float={float_max}"
                 
+                # Adiciona organização por preço menor
+                new_url = f"{new_url}&sort_by=lowest_price"
+                
                 # Limpeza de && duplicados
                 new_url = new_url.replace("&&", "&")
                 
                 print(f"🚀 Navegando para URL Otimizada: {new_url}")
                 page.goto(new_url)
-                time.sleep(3) # Aguarda carregamento inicial
+                print("⏳ Aguardando 5 segundos pós-busca (com sort_by=lowest_price)...")
+                time.sleep(5)
                 
             else:
                 print("⚠️ URL não mudou conforme esperado (sem def_index). Tentando continuar assim mesmo...")
@@ -297,11 +301,19 @@ class CSFloatScraper:
                         if on_item_found:
                             on_item_found(item)
                             
+                        # Limite rígido a pedido do usuário
+                        if len(items) >= 20:
+                            print("🛑 Limite de 20 itens atingido para o CSFloat. Encerrando.")
+                            break
+                            
                     except Exception as e:
                         print(f"Erro ao extrair card: {e}")
                         continue
                 
                 print(f"✨ +{new_items_count} novos itens extraídos.")
+                
+                if len(items) >= 20:
+                    break
                 
                 if not debug_saved and len(items) > 0:
                     try:
